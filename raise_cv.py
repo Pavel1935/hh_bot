@@ -25,6 +25,13 @@ def log(msg: str) -> None:
     LOG_PATH.open("a", encoding="utf-8").write(line + "\n")
 
 
+async def notify(client: TelegramClient, text: str) -> None:
+    try:
+        await client.send_message("me", text)  # Saved Messages
+    except Exception as e:
+        log(f"NOTIFY_ERROR: {type(e).__name__}: {e}")
+
+
 def find_button(msg, contains: str):
     buttons = getattr(msg, "buttons", None)
     if not buttons:
@@ -58,56 +65,64 @@ async def run_flow() -> int:
         return 20
 
     try:
-        async with client.conversation(BOT, timeout=30) as conv:
-            log("[1] /start")
-            await conv.send_message("/start")
-            start_msg = await conv.get_response()
-            log(f"START: {start_msg.text}")
+        try:
+            async with client.conversation(BOT, timeout=30) as conv:
+                log("[1] /start")
+                await conv.send_message("/start")
+                start_msg = await conv.get_response()
+                log(f"START: {start_msg.text}")
 
-            lk_btn = find_button(start_msg, "Личный кабинет")
-            if not lk_btn:
-                log("ERROR: No 'Личный кабинет' button")
-                return 2
+                lk_btn = find_button(start_msg, "Личный кабинет")
+                if not lk_btn:
+                    log("ERROR: No 'Личный кабинет' button")
+                    await notify(client, "❌ RaiseCV: не найдена кнопка 'Личный кабинет'")
+                    return 2
 
-            await lk_btn.click()
-            lk_msg = await conv.get_response()
-            log(f"LK: {lk_msg.text}")
+                await lk_btn.click()
+                lk_msg = await conv.get_response()
+                log(f"LK: {lk_msg.text}")
 
-            up_btn = find_button(lk_msg, "Поднять резюме")
-            if not up_btn:
-                log("ERROR: No 'Поднять резюме' button")
-                return 3
+                up_btn = find_button(lk_msg, "Поднять резюме")
+                if not up_btn:
+                    log("ERROR: No 'Поднять резюме' button")
+                    await notify(client, "❌ RaiseCV: не найдена кнопка 'Поднять резюме'")
+                    return 3
 
-            await up_btn.click()
-            resp = await conv.get_response()
-            text = resp.text or ""
-            log(f"UP_SEARCH: {text}")
+                await up_btn.click()
+                resp = await conv.get_response()
+                text = resp.text or ""
+                log(f"UP_SEARCH: {text}")
 
-            # если можно нажать "Поднять"
-            confirm_btn = find_button(resp, "Поднять")
-            if confirm_btn:
-                await confirm_btn.click()
-                final_msg = await conv.get_response()
-                log(f"FINAL: {final_msg.text}")
-                return 0
+                confirm_btn = find_button(resp, "Поднять")
+                if confirm_btn:
+                    await confirm_btn.click()
+                    final_msg = await conv.get_response()
+                    log(f"FINAL: {final_msg.text}")
+                    await notify(client, "✅ RaiseCV: действие подтверждено/выполнено")
+                    return 0
 
-            if is_too_early(text):
-                log("STATUS: TOO_EARLY")
-                return 0
+                if is_too_early(text):
+                    when = extract_time(text)
+                    status = f"TOO_EARLY_SCHEDULED_{when or '??:??'}"
+                    log(f"STATUS: {status}")
+                    await notify(client, f"✅ RaiseCV: {status}")
+                    return 0
 
-            log("STATUS: UNKNOWN_STATE")
-            return 5
+                log("STATUS: UNKNOWN_STATE")
+                await notify(client, "⚠️ RaiseCV: UNKNOWN_STATE (проверь лог)")
+                return 5
+
+        except Exception as e:
+            log(f"FATAL: {type(e).__name__}: {e}")
+            await notify(client, f"❌ RaiseCV ERROR: {type(e).__name__}: {e}")
+            return 10
 
     finally:
         await client.disconnect()
 
 
 def main() -> int:
-    try:
-        return asyncio.run(run_flow())
-    except Exception as e:
-        log(f"FATAL: {type(e).__name__}: {e}")
-        return 10
+    return asyncio.run(run_flow())
 
 
 if __name__ == "__main__":
